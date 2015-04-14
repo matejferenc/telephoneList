@@ -3,6 +3,7 @@ var http = require("http");
 var cheerio = require('cheerio');
 var mongodb = require('mongodb')
 var async = require('async');
+var querystring = require('querystring');
 
 var mongoUrl = 'mongodb://localhost:27017/telephoneList';
 
@@ -23,13 +24,21 @@ var search = function(req, res) {
 		async.parallel({
 			zlateStranky: function(callback) {
 				downloadZlateStranky(numbers.ncc, callback);
+			},
+			kdovolalnet: function(callback) {
+				downloadKdoVolalNet(numbers.n, callback);
+			},
+			kdovolalcz: function(callback) {
+				downloadKdoVolalCz(numbers.n, callback);
 			}
 		},
 		function(err, results) {
 			var zs = results.zlateStranky;
-			merge(result, results.zlateStranky);
+			merge(result, { zs: results.zlateStranky });
+			merge(result, { kvnet: results.kdovolalnet });
+			merge(result, { kvcz: results.kdovolalcz });
 			store(result);
-			res.send(result.name);
+			res.send(result.zs.name + ' ' + result.kvnet.count + ' ' + result.kvcz.status);
 		});
 	} catch(err) {
 		res.send('error ' + err);
@@ -83,15 +92,60 @@ function validateTelephoneNumber(n) {
 	console.log('number ' + n + ' is valid');
 }
 
-function downloadZlateStranky(n, callback) {
-	var url = 'http://www.zlatestranky.cz/hledani/' + encodeURIComponent(encodeURIComponent(n)) + "/";
-	var outer = this;
-
-	download(url, function(data) {
+function downloadKdoVolalCz(n, callback) {
+	var host = 'www.kdovolal.cz';
+	var path = '/cislo/';
+	var data = { cis : n, 'Hledej' : 'Hledej'}
+	
+	httppost(host, path, data, function(data) {
 		if (data) {
-			result = extractDataZS(data, callback);
-		}
-		else console.log('could not download data from url: ' + url);
+			extractDataKVCz(data, callback);
+		} else console.log('could not download data from url: ' + host + path);
+	});
+}
+
+function extractDataKVCz(data, callback) {
+	var $ = cheerio.load(data);
+	var result = {};
+	$('#post-4 > div:nth-child(2) > div.sc-box > p').each(function(i, e) {
+		var count = $(e).text();
+		result.count = count;
+	});
+	$('#post-4 > div:nth-child(2) > div.sc-box > div > span').each(function(i, e) {
+		var status = $(e).text();
+		result.status = status;
+	});
+	console.log('kv.cz extraction complete');
+	callback(null, result);
+}
+
+function downloadKdoVolalNet(n, callback) {
+	var url = 'http://kdovolal.net/' + n;
+	
+	httpget(url, function(data) {
+		if (data) {
+			extractDataKVNet(data, callback);
+		} else console.log('could not download data from url: ' + url);
+	});
+}
+
+function extractDataKVNet(data, callback) {
+	var $ = cheerio.load(data);
+	var result = { count: 0 };
+	$('html > body > div > div > table > tr').each(function(i, e) {
+		result.count += 1;
+	});
+	console.log('kv.net extraction complete');
+	callback(null, result);
+}
+
+function downloadZlateStranky(ncc, callback) {
+	var url = 'http://www.zlatestranky.cz/hledani/' + encodeURIComponent(encodeURIComponent(ncc)) + "/";
+
+	httpget(url, function(data) {
+		if (data) {
+			extractDataZS(data, callback);
+		} else console.log('could not download data from url: ' + url);
 	});
 }
 
@@ -118,13 +172,13 @@ function extractDataZS(data, callback) {
 		console.log('extracted email: ' + email);
 		result.email = email;
 	});
-	console.log('extraction complete');
+	console.log('zs extraction complete');
 	callback(null, result);
 }
 
 // Utility function that downloads a URL and invokes
 // callback with the data.
-function download(url, callback) {
+function httpget(url, callback) {
 	console.log('downloading from url: ' + url);
 	http.get(url, function(res) {
 		var data = "";
@@ -137,4 +191,46 @@ function download(url, callback) {
 	}).on('error', function() {
 		callback(null);
 	});
+}
+
+// Utility function that downloads a URL and invokes
+// callback with the data.
+function httppost(host, path, data, callback) {
+	console.log('downloading from url: ' + host + path);
+	var postData = querystring.stringify(data);
+
+	var options = {
+		hostname: host,
+		port: 80,
+		path: path,
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/x-www-form-urlencoded',
+			'Content-Length': postData.length
+		}
+	};
+
+	var req = http.request(options, function(res) {
+		//console.log('STATUS: ' + res.statusCode);
+		//console.log('HEADERS: ' + JSON.stringify(res.headers));
+		res.setEncoding('utf8');
+		var data = "";
+		res.on('data', function (chunk) {
+			console.log('httppost data');
+			data += chunk;
+		});
+		res.on('end', function() {
+			console.log('httppost end');
+			callback(data);
+		});
+	});
+
+	req.on('error', function(e) {
+		console.log(e);
+		callback(null);
+	});
+
+	// write data to request body
+	req.write(postData);
+	req.end();
 }
