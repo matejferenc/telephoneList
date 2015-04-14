@@ -4,6 +4,7 @@ var cheerio = require('cheerio');
 var mongodb = require('mongodb')
 var async = require('async');
 var querystring = require('querystring');
+var request = require('request');
 
 var mongoUrl = 'mongodb://localhost:27017/telephoneList';
 
@@ -93,25 +94,25 @@ function validateTelephoneNumber(n) {
 }
 
 function downloadKdoVolalCz(n, callback) {
-	var host = 'www.kdovolal.cz';
-	var path = '/cislo/';
+	var url = 'http://www.kdovolal.cz/cislo/';
 	var data = { cis : n, 'Hledej' : 'Hledej'}
 	
-	httppost(host, path, data, function(data) {
+	httppost(url, data, function(data) {
 		if (data) {
 			extractDataKVCz(data, callback);
-		} else console.log('could not download data from url: ' + host + path);
+		} else console.log('could not download data from url: ' + url);
 	});
 }
 
 function extractDataKVCz(data, callback) {
 	var $ = cheerio.load(data);
 	var result = {};
-	$('#post-4 > div:nth-child(2) > div.sc-box > p').each(function(i, e) {
-		var count = $(e).text();
-		result.count = count;
+	$('html > body > div > div > div > article > div > p > div > div > p').each(function(i, e) {
+		var c = $(e).text();
+		c = c.substring(c.indexOf('</strong> ') + 10, c.indexOf('x'));
+		result.searchCount = c;
 	});
-	$('#post-4 > div:nth-child(2) > div.sc-box > div > span').each(function(i, e) {
+	$('html > body > div > div > div > article > div > p > div > div > p > div > span').each(function(i, e) {
 		var status = $(e).text();
 		result.status = status;
 	});
@@ -195,42 +196,26 @@ function httpget(url, callback) {
 
 // Utility function that downloads a URL and invokes
 // callback with the data.
-function httppost(host, path, data, callback) {
-	console.log('downloading from url: ' + host + path);
+function httppost(url, data, callback) {
+	console.log('downloading from url: ' + url);
 	var postData = querystring.stringify(data);
 
-	var options = {
-		hostname: host,
-		port: 80,
-		path: path,
-		method: 'POST',
+	request({ uri : url,
+		method : 'POST',
+		form: data,
 		headers: {
-			'Content-Type': 'application/x-www-form-urlencoded',
-			'Content-Length': postData.length
-		}
-	};
-
-	var req = http.request(options, function(res) {
-		//console.log('STATUS: ' + res.statusCode);
-		//console.log('HEADERS: ' + JSON.stringify(res.headers));
-		res.setEncoding('utf8');
-		var data = "";
-		res.on('data', function (chunk) {
-			console.log('httppost data');
-			data += chunk;
-		});
-		res.on('end', function() {
-			console.log('httppost end');
-			callback(data);
-		});
+			'User-Agent' : 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.101 Safari/537.36'
+		}},
+		function (error, response, body) {
+			if (!error && response.statusCode == 200) {
+				//console.log(body);
+				//console.log(error);
+				//console.log(response);
+				callback(body);
+			} else {
+				//console.log(error);
+				//console.log(response);
+				callback(null);
+			}
 	});
-
-	req.on('error', function(e) {
-		console.log(e);
-		callback(null);
-	});
-
-	// write data to request body
-	req.write(postData);
-	req.end();
 }
