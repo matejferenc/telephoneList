@@ -21,7 +21,7 @@ var search = function(req, res) {
 	try {
 		validateTelephoneNumber(inputNormalized);
 		var numbers = resolveCountryCodes(inputNormalized);
-		var result = { n: numbers.n, ncc: numbers.ncc };
+		var record = { n: numbers.n, ncc: numbers.ncc, inserted: new Date() };
 		async.parallel({
 			zlateStranky: function(callback) {
 				downloadZlateStranky(numbers.ncc, callback);
@@ -31,15 +31,19 @@ var search = function(req, res) {
 			},
 			kdovolalcz: function(callback) {
 				downloadKdoVolalCz(numbers.n, callback);
+			},
+			tellows: function(callback) {
+				downloadTellows(numbers.n, callback);
 			}
 		},
 		function(err, results) {
 			var zs = results.zlateStranky;
-			merge(result, { zs: results.zlateStranky });
-			merge(result, { kvnet: results.kdovolalnet });
-			merge(result, { kvcz: results.kdovolalcz });
-			store(result);
-			res.send(result.zs.name + ' ' + result.kvnet.count + ' ' + result.kvcz.status);
+			merge(record, { zs: results.zlateStranky });
+			merge(record, { kvnet: results.kdovolalnet });
+			merge(record, { kvcz: results.kdovolalcz });
+			merge(record, { tellows: results.tellows });
+			store(record);
+			res.send(record.zs.name + ' ' + record.kvnet.count + ' ' + record.kvcz.status);
 		});
 	} catch(err) {
 		res.send('error ' + err);
@@ -91,6 +95,52 @@ function validateTelephoneNumber(n) {
 		throw 'number not valid ' + n;
 	}
 	console.log('number ' + n + ' is valid');
+}
+
+function downloadTellows(n, callback) {
+	var url = 'http://www.tellows.cz/num/' + n;
+	
+	httpget(url, function(data) {
+		if (data) {
+			extractDataTellows(data, callback);
+		} else console.log('could not download data from url: ' + url);
+	});
+}
+
+function extractDataTellows(data, callback) {
+	var $ = cheerio.load(data);
+	var result = {};
+	$('#details > div.box.box3 > div > p > span[itemprop=count]').each(function(i, e) {
+		var t = $(e).text();
+		result.commentsCount = t;
+	});
+	if (result.commentsCount != 0) {
+		$('#details > div.box.box3 > div > p').each(function(i, e) {
+			var t = $(e).text();
+			var s = t.substring(t.indexOf('Typy hovorů:') + 12, t.indexOf('Jméno / firma:'));
+			s = s.replace(/[\r\n]/gm, '');
+			s = s.replace(/  /gm, '');
+			result.status = s;
+			
+			var f = t.substring(t.indexOf('Jméno / firma:') + 14, t.indexOf('function klappen'));
+			f = f.replace(/více.../igm, '');
+			f = f.replace(/[\r\n]/gm, '');
+			f = f.replace(/  /gm, '');
+			result.name = f;
+			
+			var q = t.substring(t.indexOf('Poptávky po tomto čísle:') + 28, t.indexOf('function loadStats'));
+			q = q.replace(/[\r\n]/gm, '');
+			q = q.replace(/  /gm, '');
+			result.searches = q;
+		});
+		$('#tellowsscore > div.scorepic > a > img').each(function(i, e) {
+			var t = $(e).attr('src');
+			result.score = t.substring(19, 20);
+		});
+	}
+	
+	console.log('tellows extraction complete');
+	callback(null, result);
 }
 
 function downloadKdoVolalCz(n, callback) {
