@@ -7,6 +7,7 @@ var kvcz = require('./kdoVolalCz');
 var tellows = require('./tellows');
 var nv = require('./neznamyVolajici');
 var vc = require('./vyhledatCislo');
+var tools = require('./tools');
 
 var app = express();
 app.get('/', function(req, res) {
@@ -21,37 +22,21 @@ var search = function(req, res) {
 	try {
 		validateTelephoneNumber(inputNormalized);
 		var numbers = resolveCountryCodes(inputNormalized);
-		var record = { n: numbers.n, ncc: numbers.ncc, inserted: new Date() };
-		async.parallel({
-			zlateStranky: function(callback) {
-				zs.download(numbers.ncc, callback);
-			},
-			kdovolalnet: function(callback) {
-				kvnet.download(numbers.n, callback);
-			},
-			kdovolalcz: function(callback) {
-				kvcz.download(numbers.n, callback);
-			},
-			tellows: function(callback) {
-				tellows.download(numbers.n, callback);
-			},
-			neznamyVolajici: function(callback) {
-				nv.download(numbers.n, callback);
-			},
-			vyhledatCislo: function(callback) {
-				vc.download(numbers.n, callback);
+		var record = { n: numbers.n, ncc: numbers.ncc };
+
+		mongo.find(record, function(documentFound) {
+			if (documentFound) {
+				console.log('number found in db');
+				res.send(documentFound.zs.name + ' ' + documentFound.kvnet.count + ' ' + documentFound.kvcz.status);
+			} else {
+				console.log('number NOT found in db');
+				downloadFromProviders(record, numbers, function (documentDownloaded) {
+					res.send(documentDownloaded.zs.name + ' ' + documentDownloaded.kvnet.count + ' ' + documentDownloaded.kvcz.status);
+				});
 			}
-		},
-		function(err, results) {
-			merge(record, { zs: results.zlateStranky });
-			merge(record, { kvnet: results.kdovolalnet });
-			merge(record, { kvcz: results.kdovolalcz });
-			merge(record, { tellows: results.tellows });
-			merge(record, { nv: results.neznamyVolajici });
-			merge(record, { vc: results.vyhledatCislo });
-			mongo.store(record);
-			res.send(record.zs.name + ' ' + record.kvnet.count + ' ' + record.kvcz.status);
 		});
+		
+		
 	} catch(err) {
 		res.send('error ' + err);
 	}
@@ -59,11 +44,39 @@ var search = function(req, res) {
 app.get('/search', search);
 app.listen(3000);
 
-function merge(a, b) {
-	for (var attrname in b) {
-		a[attrname] = b[attrname];
-	}
+function downloadFromProviders(record, numbers, callback) {
+	async.parallel({
+		zlateStranky: function(callback) {
+			zs.download(numbers.ncc, callback);
+		},
+		kdovolalnet: function(callback) {
+			kvnet.download(numbers.n, callback);
+		},
+		kdovolalcz: function(callback) {
+			kvcz.download(numbers.n, callback);
+		},
+		tellows: function(callback) {
+			tellows.download(numbers.n, callback);
+		},
+		neznamyVolajici: function(callback) {
+			nv.download(numbers.n, callback);
+		},
+		vyhledatCislo: function(callback) {
+			vc.download(numbers.n, callback);
+		}
+	},
+	function(err, results) {
+		tools.merge(record, { zs: results.zlateStranky });
+		tools.merge(record, { kvnet: results.kdovolalnet });
+		tools.merge(record, { kvcz: results.kdovolalcz });
+		tools.merge(record, { tellows: results.tellows });
+		tools.merge(record, { nv: results.neznamyVolajici });
+		tools.merge(record, { vc: results.vyhledatCislo });
+		callback(record);
+		mongo.store(record);
+	});
 }
+
 
 function normalize(n) {
 	n = n.replace(/-/g, '')
