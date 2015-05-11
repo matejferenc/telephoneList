@@ -42,7 +42,7 @@ var search = function(req, res) {
 	}
 };
 app.get('/search', search);
-app.listen(3000);
+app.listen(80);
 
 function downloadFromProviders(record, numbers, callback) {
 	async.parallel({
