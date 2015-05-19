@@ -42,7 +42,7 @@ var search = function(req, res) {
 	}
 };
 app.get('/search', search);
-app.listen(3030, '2a01:430:17:1::ffff:840');
+app.listen(3030, '0.0.0.0');
 
 function downloadFromProviders(record, numbers, callback) {
 	async.parallel({
